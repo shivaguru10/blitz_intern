@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { CollegeCombobox } from "@/components/CollegeCombobox";
+import { INDIAN_COLLEGES } from "@/lib/indian-colleges";
 import { registerSchema } from "@/lib/validation";
 import type { Batch, Domain } from "@/lib/types";
 import type { z } from "zod";
@@ -24,9 +26,15 @@ export function RegisterForm({ domains, batches }: { domains: Domain[]; batches:
     register,
     formState: { errors },
     handleSubmit,
+    setValue,
+    watch,
   } = useForm<RegisterValues>({
     resolver: zodResolver(registerSchema),
+    defaultValues: {
+      college: "",
+    },
   });
+  const collegeValue = watch("college") ?? "";
 
   useEffect(() => {
     if (state.message && !state.ok) toast.error(state.message);
@@ -50,7 +58,12 @@ export function RegisterForm({ domains, batches }: { domains: Domain[]; batches:
         </Field>
       </div>
       <Field label="College name" error={errors.college?.message}>
-        <Input {...register("college")} name="college" />
+        <input type="hidden" {...register("college")} />
+        <CollegeCombobox
+          colleges={INDIAN_COLLEGES}
+          value={collegeValue}
+          onChange={(value) => setValue("college", value, { shouldDirty: true, shouldValidate: true })}
+        />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Degree" error={errors.degree?.message}>
