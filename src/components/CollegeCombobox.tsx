@@ -5,6 +5,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+type CollegeSuggestion = {
+  name: string;
+  city?: string | null;
+  state?: string | null;
+  address?: string | null;
+  source?: string;
+};
+
 type CollegeComboboxProps = {
   colleges: readonly string[];
   value: string;
@@ -18,6 +26,9 @@ export function CollegeCombobox({ colleges, value, onChange }: CollegeComboboxPr
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [remoteSuggestions, setRemoteSuggestions] = useState<CollegeSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [source, setSource] = useState<"aishe" | "local">("local");
 
   useEffect(() => {
     setQuery(value);
@@ -34,14 +45,58 @@ export function CollegeCombobox({ colleges, value, onChange }: CollegeComboboxPr
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
 
-  const suggestions = useMemo(() => {
+  const localSuggestions = useMemo<CollegeSuggestion[]>(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return colleges.slice(0, MAX_RESULTS);
+    if (!normalized) {
+      return colleges.slice(0, MAX_RESULTS).map((name) => ({ name, source: "local" }));
+    }
 
     return colleges
       .filter((college) => college.toLowerCase().includes(normalized))
-      .slice(0, MAX_RESULTS);
+      .slice(0, MAX_RESULTS)
+      .map((name) => ({ name, source: "local" }));
   }, [colleges, query]);
+
+  useEffect(() => {
+    const search = query.trim();
+    if (search.length < 2) {
+      setRemoteSuggestions([]);
+      setSource("local");
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/colleges?search=${encodeURIComponent(search)}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("College search failed");
+        const payload = (await response.json()) as {
+          colleges?: CollegeSuggestion[];
+          source?: "aishe" | "local";
+        };
+        setRemoteSuggestions(payload.colleges ?? []);
+        setSource(payload.source ?? "local");
+      } catch {
+        if (!controller.signal.aborted) {
+          setRemoteSuggestions([]);
+          setSource("local");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [query]);
+
+  const suggestions = remoteSuggestions.length ? remoteSuggestions : localSuggestions;
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -76,12 +131,14 @@ export function CollegeCombobox({ colleges, value, onChange }: CollegeComboboxPr
           role="listbox"
           className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-lg border bg-white p-1 shadow-xl"
         >
-          {suggestions.length ? (
+          {loading ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">Searching Indian colleges...</div>
+          ) : suggestions.length ? (
             suggestions.map((college) => {
-              const selected = value === college;
+              const selected = value === college.name;
               return (
                 <button
-                  key={college}
+                  key={`${college.name}-${college.city ?? ""}-${college.state ?? ""}`}
                   type="button"
                   role="option"
                   aria-selected={selected}
@@ -91,13 +148,20 @@ export function CollegeCombobox({ colleges, value, onChange }: CollegeComboboxPr
                   )}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
-                    setQuery(college);
-                    onChange(college);
+                    setQuery(college.name);
+                    onChange(college.name);
                     setOpen(false);
                   }}
                 >
                   <Check className={cn("mt-0.5 h-4 w-4 text-accent", selected ? "opacity-100" : "opacity-0")} />
-                  <span>{college}</span>
+                  <span>
+                    <span className="block font-medium">{college.name}</span>
+                    {college.city || college.state ? (
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {[college.city, college.state].filter(Boolean).join(", ")}
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               );
             })
@@ -110,7 +174,9 @@ export function CollegeCombobox({ colleges, value, onChange }: CollegeComboboxPr
       ) : null}
 
       <p className="mt-2 text-xs text-muted-foreground">
-        Start typing to search Indian colleges. If yours is missing, keep your typed college name.
+        {query.trim().length >= 2 && source === "aishe"
+          ? "Suggestions are fetched from an AISHE-based Indian colleges directory."
+          : "Start typing to search Indian colleges. If yours is missing, keep your typed college name."}
       </p>
     </div>
   );
